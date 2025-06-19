@@ -1,0 +1,76 @@
+name: 'cicd-s3-sync'
+description: 'This GitHub Action is designed to automate the process of upload on s3 assets.'
+author: 'lelered'
+
+
+inputs:
+
+  aws-region:
+    description: "AWS Region"
+    default: "eu-west-1"
+    required: true
+
+  aws-role-to-assume:
+    description: "AWS Role ARN to Assume"
+    required: true
+
+  aws-s3-sync-extra-params:
+    description: "aws-s3-sync-extra-params"
+    required: false
+    default: "--delete"
+
+  source-full-path:
+    description: "Directory or `s3 url` to upload to S3"
+    required: true
+
+  destination-bucket-name:
+    description: "destination-bucket-name"
+    required: true
+
+  destination-path:
+    description: "destination-path"
+    required: true
+    default: "/"
+
+  aws-cloudfront-distribution-id:
+    description: "CloudFront Distribution ID (optional)"
+    required: false
+    default: null
+
+
+runs:
+  using: "composite"
+  outputs:
+    destination-url: ${{ steps.set_variables.outputs.DESTINATION_URL }}
+  steps:
+    -
+      name: set variables
+      id: set_variables
+      run: |
+        echo "DESTINATION_URL=s3://${{ inputs.destination-bucket-name }}/${{ inputs.destination-path }}" >> $GITHUB_ENV
+        echo "DESTINATION_URL=${{ env.DESTINATION_URL }}" >> $GITHUB_OUTPUT
+    -
+      name: AWS CLI configuration
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ inputs.aws-role-to-assume }}
+        aws-region: ${{ inputs.aws-region }}
+    -
+      name: Sync on S3
+      shell: bash
+      run: aws s3 sync ${{ inputs.source-full-path }} ${{ env.DESTINATION_URL }} ${{ inputs.aws-s3-sync-extra-params }}
+    -
+      name: CloudFront invalidation
+      if: ${{ inputs.aws-cloudfront-distribution-id }}
+      shell: bash
+      run: |
+        aws cloudfront create-invalidation --distribution-id ${{ inputs.aws-cloudfront-distribution-id }} --paths "${{ inputs.destination-path }}*"
+    -
+      name: Output deployment info
+      shell: bash
+      run: |
+        echo "✅ Deployment completed successfully!"
+        echo "📦 Destination: ${{ env.DESTINATION_URL }}
+        if [ "${{ inputs.aws-cloudfront-distribution-id }}" == "null" ]; then
+          echo "🚀 CloudFront invalidation triggered for: ${{ inputs.destination-path }}*"
+        fi
